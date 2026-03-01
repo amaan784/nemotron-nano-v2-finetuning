@@ -40,6 +40,7 @@ import torch
 from datetime import datetime
 from trl import SFTTrainer, SFTConfig
 from unsloth import FastLanguageModel
+from datasets import load_dataset
 
 # ============================================================
 # CONFIG
@@ -188,7 +189,6 @@ print(f"\n📊 Loading dataset")
 print(f"   Train: {TRAIN_FILE}")
 print(f"   Eval:  {EVAL_FILE}")
 
-from datasets import load_dataset
 
 dataset = load_dataset("json", data_files={
     "train": TRAIN_FILE,
@@ -198,31 +198,18 @@ dataset = load_dataset("json", data_files={
 print(f"   Train examples: {len(dataset['train'])}")
 print(f"   Eval examples:  {len(dataset['eval'])}")
 
-def formatting_func(examples):
-    """Convert messages to Mistral Nemo chat format."""
-    texts = []
-    for messages in examples["messages"]:
-        text = tokenizer.apply_chat_template(
-            messages,
-            tokenize=False,
-            add_generation_prompt=False,
-        )
-        texts.append(text)
-    return {"text": texts}
+def to_text(messages):
+    return tokenizer.apply_chat_template(
+        messages,
+        tokenize=False,
+        add_generation_prompt=False,
+    )
 
-train_dataset = dataset["train"].map(
-    formatting_func,
-    batched=True,
-    num_proc=1,
-    remove_columns=["messages"],
-)
+train_texts = [to_text(m) for m in dataset["train"]["messages"]]
+eval_texts  = [to_text(m) for m in dataset["eval"]["messages"]]
 
-eval_dataset = dataset["eval"].map(
-    formatting_func,
-    batched=True,
-    num_proc=1,
-    remove_columns=["messages"],
-)
+train_dataset = dataset["train"].remove_columns(["messages"]).add_column("text", train_texts)
+eval_dataset  = dataset["eval"].remove_columns(["messages"]).add_column("text", eval_texts)
 
 # Log data stats
 text_lengths = [len(t) for t in train_dataset["text"]]
