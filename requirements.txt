@@ -7,13 +7,15 @@ torchvision
 torchaudio
 
 # Unsloth (QLoRA fine-tuning)
+# Training
 unsloth[colab-new] @ git+https://github.com/unslothai/unsloth.git
+unsloth_zoo @ git+https://github.com/unslothai/unsloth-zoo.git
 
 # Training
-trl
+trl==0.29.0
+transformers==4.57.6
 peft
 accelerate
-transformers
 bitsandbytes
 datasets
 
