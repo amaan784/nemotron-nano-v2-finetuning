@@ -49,11 +49,11 @@ parser.add_argument("--eval-file", type=str, default="eval.jsonl")
 parser.add_argument("--model", type=str, default="mistralai/Mistral-Nemo-Instruct-2407")
 parser.add_argument("--epochs", type=int, default=5)
 parser.add_argument("--batch-size", type=int, default=1)
-parser.add_argument("--gradient-accumulation", type=int, default=4)
+parser.add_argument("--gradient-accumulation", type=int, default=8)
 parser.add_argument("--learning-rate", type=float, default=2e-4)
 parser.add_argument("--lora-rank", type=int, default=32)
 parser.add_argument("--lora-alpha", type=int, default=64)
-parser.add_argument("--max-seq-length", type=int, default=4096)
+parser.add_argument("--max-seq-length", type=int, default=2048)
 parser.add_argument("--output-dir", type=str, default="outputs/mistral-nemo-behavioral-lora")
 parser.add_argument("--no-wandb", action="store_true", help="Disable W&B tracking")
 cli_args = parser.parse_args()
@@ -61,6 +61,9 @@ cli_args = parser.parse_args()
 # ============================================================
 # CONFIG
 # ============================================================
+
+# Help with CUDA memory fragmentation
+os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
 CONFIG = {
     # Model
@@ -257,11 +260,10 @@ trainer = SFTTrainer(
         bf16=torch.cuda.is_bf16_supported(),
         logging_steps=1,
         eval_strategy="epoch",
+        eval_accumulation_steps=1,
         save_strategy="epoch",
-        save_total_limit=2,
-        load_best_model_at_end=True,
-        metric_for_best_model="eval_loss",
-        greater_is_better=False,
+        save_total_limit=1,
+        load_best_model_at_end=False,
         report_to="wandb" if USE_WANDB else "none",
         run_name=run.name if USE_WANDB else None,
         max_length=C["max_seq_length"],
@@ -269,6 +271,9 @@ trainer = SFTTrainer(
         packing=False,
         dataset_num_proc=1,
         dataloader_num_workers=0,
+        gradient_checkpointing=True,
+        gradient_checkpointing_kwargs={"use_reentrant": False},
+        optim="adamw_8bit",
     ),
 )
 
