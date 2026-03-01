@@ -41,26 +41,38 @@ echo "[OK] GPU: $GPU_NAME ($GPU_MEM)"
 echo ""
 
 # ============================================================
-# 2. INSTALL UNSLOTH
+# 2. ENSURE PIP IS AVAILABLE
+# ============================================================
+
+echo "[CHECK] Ensuring pip is available..."
+if ! python -m pip --version > /dev/null 2>&1; then
+    echo "[FIX] pip not found in current Python environment, bootstrapping..."
+    python -m ensurepip --upgrade || curl -sS https://bootstrap.pypa.io/get-pip.py | python
+fi
+python -m pip install --upgrade pip
+echo "[OK] pip ready: $(python -m pip --version)"
+echo ""
+
+# ============================================================
+# 3. INSTALL UNSLOTH
 # ============================================================
 
 echo "[INSTALL] Installing Unsloth (handles torch, transformers, bitsandbytes)..."
-pip install --upgrade pip
-pip install "unsloth[colab-new] @ git+https://github.com/unslothai/unsloth.git" --quiet
+python -m pip install "unsloth[colab-new] @ git+https://github.com/unslothai/unsloth.git"
 
 # Verify unsloth
 python -c "from unsloth import FastLanguageModel; print('[OK] Unsloth installed')"
 
 # ============================================================
-# 3. INSTALL TRAINING DEPENDENCIES
+# 4. INSTALL TRAINING DEPENDENCIES
 # ============================================================
 
 echo ""
 echo "[INSTALL] Installing training dependencies..."
-pip install wandb datasets trl peft accelerate --quiet
+python -m pip install wandb datasets trl peft accelerate
 
 # ============================================================
-# 4. LOGIN TO W&B
+# 5. LOGIN TO W&B
 # ============================================================
 
 echo ""
@@ -75,7 +87,7 @@ else
 fi
 
 # ============================================================
-# 5. LOGIN TO HUGGING FACE
+# 6. LOGIN TO HUGGING FACE
 # ============================================================
 
 echo ""
@@ -90,7 +102,7 @@ else
 fi
 
 # ============================================================
-# 6. VERIFY EVERYTHING
+# 7. VERIFY EVERYTHING
 # ============================================================
 
 echo ""
@@ -128,7 +140,7 @@ print('     No mamba_ssm needed -- Mistral Nemo is pure Transformer')
 "
 
 # ============================================================
-# 7. DONE
+# 8. DONE
 # ============================================================
 
 echo ""
@@ -147,5 +159,5 @@ echo "Fallback to Mistral 7B (if VRAM issues):"
 echo "  MODEL=unsloth/mistral-7b-instruct-v0.3-bnb-4bit python finetune.py"
 echo ""
 echo "Push to HuggingFace after training:"
-echo "  HF_REPO=mistral-hackaton-2026/agentic-world-lora python finetune.py"
+echo "  HF_REPO=mistral-hackathon-2026/agentic-world-lora python finetune.py"
 echo ""
