@@ -114,7 +114,7 @@ try:
             "learning_rate": LEARNING_RATE,
             "warmup_steps": WARMUP_STEPS,
             "lr_scheduler": LR_SCHEDULER,
-            "max_seq_length": MAX_SEQ_LENGTH,
+            "max_length": MAX_SEQ_LENGTH,
             "method": "QLoRA-4bit",
             "weight_decay": WEIGHT_DECAY,
         },
@@ -136,7 +136,7 @@ print(f"   4-bit quantization: {LOAD_IN_4BIT}")
 
 model, tokenizer = FastLanguageModel.from_pretrained(
     model_name=MODEL_NAME,
-    max_seq_length=MAX_SEQ_LENGTH,
+    max_length=MAX_SEQ_LENGTH,
     dtype=DTYPE,
     load_in_4bit=LOAD_IN_4BIT,
 )
@@ -270,6 +270,8 @@ trainer = SFTTrainer(
         max_length=MAX_SEQ_LENGTH,
         dataset_text_field="text",
         packing=False,
+        dataset_num_proc=1,
+        dataloader_num_workers=0
     ),
 )
 
@@ -324,7 +326,7 @@ with open(config_path, "w") as f:
         "epochs": NUM_EPOCHS,
         "learning_rate": LEARNING_RATE,
         "lr_scheduler": LR_SCHEDULER,
-        "max_seq_length": MAX_SEQ_LENGTH,
+        "max_length": MAX_SEQ_LENGTH,
         "train_examples": len(train_dataset),
         "eval_examples": len(eval_dataset),
         "final_train_loss": train_result.training_loss,

@@ -12,7 +12,7 @@ unsloth[colab-new] @ git+https://github.com/unslothai/unsloth.git
 unsloth_zoo @ git+https://github.com/unslothai/unsloth-zoo.git
 
 # Training
-trl==0.29.0
+trl==0.24.0
 transformers==4.57.6
 peft
 accelerate
