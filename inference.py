@@ -99,7 +99,9 @@ if tokenizer.pad_token is None:
 if os.path.exists(args.adapter):
     print(f"🔧 Loading LoRA adapter: {args.adapter}")
     model = PeftModel.from_pretrained(model, args.adapter)
-    print(f"✅ Adapter loaded")
+    print(f"🔀 Merging adapter into base model for fast inference...")
+    model = model.merge_and_unload()
+    print(f"✅ Adapter merged")
 else:
     print(f"⚠️  No adapter found at {args.adapter}, using base model")
 
@@ -122,10 +124,13 @@ def generate_profile(url: str, description: str) -> str:
     input_ids = tokenizer.apply_chat_template(
         messages, tokenize=True, add_generation_prompt=True, return_tensors="pt",
     ).to(model.device)
+    attention_mask = torch.ones_like(input_ids)
 
     with torch.no_grad():
         output = model.generate(
             input_ids=input_ids,
+            attention_mask=attention_mask,
+            pad_token_id=tokenizer.eos_token_id,
             max_new_tokens=args.max_tokens,
             temperature=args.temperature,
             top_p=0.9,
