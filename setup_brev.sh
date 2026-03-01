@@ -14,10 +14,16 @@ echo "============================================"
 echo "AGENTIC WORLD — BREV SETUP"
 echo "============================================"
 
+# Load .env if present
+if [ -f .env ]; then
+    echo "Loading .env file..."
+    export $(grep -v '^#' .env | xargs)
+fi
+
 # Check GPU
 echo ""
 echo "Checking GPU..."
-nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv,noheader
+nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv,noheader || echo "WARNING: nvidia-smi failed. Check GPU drivers."
 echo ""
 
 # Install Unsloth (handles torch, transformers, etc.)
@@ -29,16 +35,26 @@ pip install unsloth
 echo "Installing W&B, datasets, trl..."
 pip install wandb datasets trl
 
-# Login to W&B (interactive)
+# Login to W&B
 echo ""
-echo "Login to Weights & Biases:"
-echo "   Get your API key from https://wandb.ai/authorize"
-wandb login
+if [ -n "$WANDB_API_KEY" ]; then
+    echo "Logging into W&B using .env key..."
+    wandb login "$WANDB_API_KEY"
+else
+    echo "Login to Weights & Biases:"
+    echo "   Get your API key from https://wandb.ai/authorize"
+    wandb login
+fi
 
-# Login to HuggingFace (optional, for pushing model)
+# Login to HuggingFace
 echo ""
-echo "Login to HuggingFace (optional, press Enter to skip):"
-huggingface-cli login || echo "Skipped HF login"
+if [ -n "$HF_TOKEN" ]; then
+    echo "Logging into HuggingFace using .env token..."
+    huggingface-cli login --token "$HF_TOKEN"
+else
+    echo "Login to HuggingFace (optional, press Enter to skip):"
+    huggingface-cli login || echo "Skipped HF login"
+fi
 
 # Verify installation
 echo ""
