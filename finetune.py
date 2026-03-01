@@ -38,6 +38,8 @@ import os
 import json
 import torch
 from datetime import datetime
+from trl import SFTTrainer, SFTConfig
+from unsloth import FastLanguageModel
 
 # ============================================================
 # CONFIG
@@ -131,8 +133,6 @@ except Exception as e:
 print(f"\n📦 Loading model: {MODEL_NAME}")
 print(f"   Max seq length: {MAX_SEQ_LENGTH}")
 print(f"   4-bit quantization: {LOAD_IN_4BIT}")
-
-from unsloth import FastLanguageModel
 
 model, tokenizer = FastLanguageModel.from_pretrained(
     model_name=MODEL_NAME,
@@ -240,7 +240,6 @@ print(f"   Batch size: {BATCH_SIZE} (effective: {BATCH_SIZE * GRADIENT_ACCUMULAT
 print(f"   Learning rate: {LEARNING_RATE}")
 print(f"   Scheduler: {LR_SCHEDULER}")
 
-from trl import SFTTrainer, SFTConfig
 
 trainer = SFTTrainer(
     model=model,
@@ -277,7 +276,7 @@ trainer = SFTTrainer(
 gpu_stats = torch.cuda.get_device_properties(0)
 reserved_memory = torch.cuda.max_memory_reserved() / 1024 / 1024 / 1024
 print(f"\n   GPU: {gpu_stats.name}")
-print(f"   Total VRAM: {gpu_stats.total_mem / 1024 / 1024 / 1024:.1f} GB")
+print(f"   Total VRAM: {gpu_stats.total_memory / 1024**3:.1f} GB")
 print(f"   Reserved: {reserved_memory:.1f} GB")
 
 train_result = trainer.train()
