@@ -1,0 +1,11 @@
+{
+	"folders": [
+		{
+			"path": "../PosthogAgent"
+		},
+		{
+			"path": "."
+		}
+	],
+	"settings": {}
+}
