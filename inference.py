@@ -2,72 +2,94 @@
 ============================================================
 Agentic World — Inference Pipeline
 ============================================================
-Loads the fine-tuned Nemotron Nano 9B v2 adapter and generates
-behavioral profiles for any website, then formats the output
-as AgentQL-compatible action plans.
+Loads fine-tuned Mistral Nemo 12B LoRA adapter and generates
+behavioral profiles for any website description.
 
 Usage:
-    python inference.py --url "https://example.com" --description "An e-commerce site..."
-    python inference.py --interactive  # Interactive mode
-    
-Requires: The trained adapter in outputs/nemotron-behavioral-lora/
+    # Single website
+    python inference.py --url https://example.com --description "An e-commerce site..."
+
+    # Interactive mode
+    python inference.py --interactive
+
+    # Batch mode
+    python inference.py --batch sites.json
+
+    # Custom adapter path
+    python inference.py --adapter ./my-adapter --url ...
+
+Output: Behavioral profile + AgentQL-compatible action plan
 ============================================================
 """
 
-import argparse
-import json
 import os
-import torch
+import sys
+import json
+import argparse
 from datetime import datetime
 
 # ============================================================
 # CONFIG
 # ============================================================
 
-BASE_MODEL = "unsloth/NVIDIA-Nemotron-Nano-9B-v2-bnb-4bit"
-ADAPTER_DIR = "outputs/nemotron-behavioral-lora"
+DEFAULT_MODEL = "unsloth/Mistral-Nemo-Instruct-2407-bnb-4bit"
+DEFAULT_ADAPTER = "outputs/mistral-nemo-behavioral-lora"
 MAX_SEQ_LENGTH = 4096
 
 SYSTEM_PROMPT = """You are a behavioral simulation model. Given a website description, generate a detailed behavioral profile describing how a user would interact with the website. Include: navigation pattern, reading behavior, engagement style, interaction speed, content preferences, typing behavior, feature discovery, and session flow with specific timings."""
 
 # ============================================================
+# PARSE ARGS
+# ============================================================
+
+parser = argparse.ArgumentParser(description="Generate behavioral profiles for websites")
+parser.add_argument("--url", type=str, help="Website URL")
+parser.add_argument("--description", type=str, help="Website description")
+parser.add_argument("--interactive", action="store_true", help="Interactive mode")
+parser.add_argument("--batch", type=str, help="Path to JSON file with multiple sites")
+parser.add_argument("--adapter", type=str, default=DEFAULT_ADAPTER, help="Path to LoRA adapter")
+parser.add_argument("--model", type=str, default=DEFAULT_MODEL, help="Base model name")
+parser.add_argument("--max-tokens", type=int, default=2048, help="Max output tokens")
+parser.add_argument("--temperature", type=float, default=0.7, help="Sampling temperature")
+parser.add_argument("--output", type=str, help="Output file path (JSON)")
+args = parser.parse_args()
+
+# ============================================================
 # LOAD MODEL + ADAPTER
 # ============================================================
 
-def load_model():
-    """Load base model with fine-tuned LoRA adapter."""
-    print(f"Loading base model: {BASE_MODEL}")
-    print(f"Loading adapter: {ADAPTER_DIR}")
+print("=" * 60)
+print("AGENTIC WORLD — BEHAVIORAL INFERENCE")
+print("=" * 60)
 
-    from unsloth import FastLanguageModel
+from unsloth import FastLanguageModel
 
-    model, tokenizer = FastLanguageModel.from_pretrained(
-        model_name=ADAPTER_DIR,  # This loads base + adapter
-        max_seq_length=MAX_SEQ_LENGTH,
-        dtype=None,
-        load_in_4bit=True,
-    )
+print(f"\n📦 Loading base model: {args.model}")
+model, tokenizer = FastLanguageModel.from_pretrained(
+    model_name=args.model,
+    max_seq_length=MAX_SEQ_LENGTH,
+    dtype=None,
+    load_in_4bit=True,
+)
 
-    FastLanguageModel.for_inference(model)
-    print(f"Model loaded and ready for inference")
-    return model, tokenizer
+# Load LoRA adapter if it exists
+if os.path.exists(args.adapter):
+    print(f"🔧 Loading LoRA adapter: {args.adapter}")
+    from peft import PeftModel
+    model = PeftModel.from_pretrained(model, args.adapter)
+    print(f"✅ Adapter loaded")
+else:
+    print(f"⚠️  No adapter found at {args.adapter}, using base model")
 
+FastLanguageModel.for_inference(model)
+print(f"✅ Model ready for inference\n")
 
 # ============================================================
-# GENERATE BEHAVIORAL PROFILE
+# GENERATION FUNCTION
 # ============================================================
 
-def generate_behavioral_profile(
-    model,
-    tokenizer,
-    url: str,
-    description: str,
-    max_tokens: int = 2048,
-    temperature: float = 0.7,
-    top_p: float = 0.9,
-) -> str:
-    """Generate a behavioral profile for a given website."""
-
+def generate_profile(url: str, description: str) -> str:
+    """Generate a behavioral profile for a website."""
     user_content = f"Website: {url}\nDescription: {description}"
 
     messages = [
@@ -76,172 +98,116 @@ def generate_behavioral_profile(
     ]
 
     input_ids = tokenizer.apply_chat_template(
-        messages,
-        tokenize=True,
-        add_generation_prompt=True,
-        return_tensors="pt",
+        messages, tokenize=True, add_generation_prompt=True, return_tensors="pt",
     ).to("cuda")
 
-    with torch.no_grad():
-        output = model.generate(
-            input_ids=input_ids,
-            max_new_tokens=max_tokens,
-            temperature=temperature,
-            top_p=top_p,
-            do_sample=True,
-        )
+    output = model.generate(
+        input_ids=input_ids,
+        max_new_tokens=args.max_tokens,
+        temperature=args.temperature,
+        top_p=0.9,
+        do_sample=True,
+    )
 
     response = tokenizer.decode(output[0][input_ids.shape[1]:], skip_special_tokens=True)
     return response
 
 
-# ============================================================
-# CONVERT TO AGENTQL ACTION PLAN
-# ============================================================
-
-def behavioral_profile_to_agentql_plan(profile: str, url: str) -> dict:
-    """
-    Parse the behavioral profile and structure it as an AgentQL
-    action plan. This is the bridge between the fine-tuned model
-    output and AgentQL execution.
-    
-    AgentQL expects:
-    - A target URL
-    - A sequence of actions with types and parameters
-    - Timing constraints
-    """
-
-    action_plan = {
-        "target_url": url,
-        "generated_at": datetime.now().isoformat(),
+def profile_to_action_plan(profile: str, url: str) -> dict:
+    """Convert behavioral profile to AgentQL-compatible action plan."""
+    return {
+        "url": url,
         "behavioral_profile": profile,
-        "agentql_config": {
-            "headless": False,  # Show browser for demo
-            "viewport": {"width": 1920, "height": 1080},
-            "timeout_ms": 30000,
-        },
-        # The behavioral profile text is passed directly to AgentQL
-        # as the instruction set. AgentQL's LLM layer interprets
-        # the behavioral descriptions and executes accordingly.
-        "execution_prompt": f"""You are browsing the website at {url}.
-
-Follow this behavioral profile EXACTLY. Do not deviate from the 
-described patterns. The timings, hesitations, scroll speeds, and 
-interaction patterns must match what is described below.
-
-BEHAVIORAL PROFILE:
-{profile}
-
-Execute each step of the session flow described above. Between 
-actions, wait the specified durations. Scroll at the specified 
-speeds. Hesitate before clicks as described. Follow the exact 
-navigation pattern and content preferences outlined.""",
+        "generated_at": datetime.now().isoformat(),
+        "model": args.model,
+        "adapter": args.adapter if os.path.exists(args.adapter) else None,
+        "agentql_prompt": (
+            f"You are a browser automation agent. Visit {url} and interact with it "
+            f"exactly as described in this behavioral profile:\n\n{profile}\n\n"
+            f"Execute each action in sequence with the specified timings. "
+            f"Use AgentQL queries to locate elements and interact with them."
+        ),
     }
 
-    return action_plan
-
-
 # ============================================================
-# BATCH PROCESSING
+# EXECUTION MODES
 # ============================================================
 
-def process_websites_from_file(model, tokenizer, input_file: str, output_file: str):
-    """
-    Process multiple websites from a JSON file.
-    Input format: [{"url": "...", "description": "..."}, ...]
-    """
-    with open(input_file) as f:
-        websites = json.load(f)
-
+if args.interactive:
+    # Interactive mode
+    print("🎮 Interactive mode — type 'quit' to exit\n")
     results = []
-    for i, site in enumerate(websites):
-        print(f"\n[{i+1}/{len(websites)}] Processing: {site['url']}")
-        profile = generate_behavioral_profile(
-            model, tokenizer, site["url"], site["description"]
-        )
-        plan = behavioral_profile_to_agentql_plan(profile, site["url"])
-        results.append(plan)
-        print(f"  Generated {len(profile)} chars")
 
-    with open(output_file, "w") as f:
-        json.dump(results, f, indent=2)
-    print(f"\nSaved {len(results)} action plans to {output_file}")
+    while True:
+        url = input("URL: ").strip()
+        if url.lower() == "quit":
+            break
 
+        description = input("Description: ").strip()
+        if description.lower() == "quit":
+            break
 
-# ============================================================
-# MAIN
-# ============================================================
-
-def main():
-    parser = argparse.ArgumentParser(description="Generate behavioral profiles for websites")
-    parser.add_argument("--url", type=str, help="Website URL")
-    parser.add_argument("--description", type=str, help="Website description")
-    parser.add_argument("--interactive", action="store_true", help="Interactive mode")
-    parser.add_argument("--batch", type=str, help="Path to JSON file with multiple websites")
-    parser.add_argument("--output", type=str, default="action_plans.json", help="Output file for batch mode")
-    parser.add_argument("--temperature", type=float, default=0.7)
-    parser.add_argument("--max-tokens", type=int, default=2048)
-    args = parser.parse_args()
-
-    model, tokenizer = load_model()
-
-    if args.batch:
-        process_websites_from_file(model, tokenizer, args.batch, args.output)
-
-    elif args.interactive:
-        print("\nInteractive mode -- Enter website details (Ctrl+C to exit)")
-        while True:
-            try:
-                print("\n" + "=" * 60)
-                url = input("URL: ").strip()
-                desc = input("Description: ").strip()
-                if not url or not desc:
-                    print("Both URL and description are required.")
-                    continue
-
-                print("\nGenerating behavioral profile...")
-                profile = generate_behavioral_profile(
-                    model, tokenizer, url, desc,
-                    temperature=args.temperature,
-                    max_tokens=args.max_tokens,
-                )
-
-                print(f"\n{'='*60}")
-                print("BEHAVIORAL PROFILE")
-                print(f"{'='*60}")
-                print(profile)
-
-                plan = behavioral_profile_to_agentql_plan(profile, url)
-                plan_file = f"plan_{url.replace('https://', '').replace('/', '_')[:30]}.json"
-                with open(plan_file, "w") as f:
-                    json.dump(plan, f, indent=2)
-                print(f"\nAction plan saved to {plan_file}")
-
-            except KeyboardInterrupt:
-                print("\n\nExiting")
-                break
-
-    elif args.url and args.description:
-        print(f"\nGenerating behavioral profile for {args.url}...")
-        profile = generate_behavioral_profile(
-            model, tokenizer, args.url, args.description,
-            temperature=args.temperature,
-            max_tokens=args.max_tokens,
-        )
+        print(f"\n⏳ Generating behavioral profile...")
+        profile = generate_profile(url, description)
 
         print(f"\n{'='*60}")
-        print("BEHAVIORAL PROFILE")
+        print(f"BEHAVIORAL PROFILE — {url}")
         print(f"{'='*60}")
         print(profile)
+        print(f"\n{'='*60}")
+        print(f"Length: {len(profile)} chars, ~{len(profile)//4} tokens\n")
 
-        plan = behavioral_profile_to_agentql_plan(profile, args.url)
+        results.append(profile_to_action_plan(profile, url))
+
+    if args.output and results:
         with open(args.output, "w") as f:
-            json.dump(plan, f, indent=2)
-        print(f"\nAction plan saved to {args.output}")
+            json.dump(results, f, indent=2)
+        print(f"\n💾 Saved {len(results)} profiles to {args.output}")
 
-    else:
-        parser.print_help()
+elif args.batch:
+    # Batch mode
+    print(f"📦 Batch mode — loading {args.batch}")
+    with open(args.batch) as f:
+        sites = json.load(f)
 
+    results = []
+    for i, site in enumerate(sites):
+        url = site["url"]
+        description = site["description"]
+        print(f"\n[{i+1}/{len(sites)}] Generating profile for {url}...")
 
-if __name__ == "__main__":
-    main()
+        profile = generate_profile(url, description)
+        result = profile_to_action_plan(profile, url)
+        results.append(result)
+
+        print(f"   ✅ {len(profile)} chars generated")
+
+    output_path = args.output or f"behavioral_profiles_{datetime.now().strftime('%Y%m%d_%H%M')}.json"
+    with open(output_path, "w") as f:
+        json.dump(results, f, indent=2)
+    print(f"\n💾 Saved {len(results)} profiles to {output_path}")
+
+elif args.url and args.description:
+    # Single-shot mode
+    print(f"⏳ Generating behavioral profile for {args.url}...")
+    profile = generate_profile(args.url, args.description)
+
+    print(f"\n{'='*60}")
+    print(f"BEHAVIORAL PROFILE — {args.url}")
+    print(f"{'='*60}")
+    print(profile)
+    print(f"\n{'='*60}")
+    print(f"Length: {len(profile)} chars, ~{len(profile)//4} tokens")
+
+    if args.output:
+        result = profile_to_action_plan(profile, args.url)
+        with open(args.output, "w") as f:
+            json.dump(result, f, indent=2)
+        print(f"\n💾 Saved to {args.output}")
+
+else:
+    print("Usage:")
+    print("  python inference.py --url URL --description 'Site description...'")
+    print("  python inference.py --interactive")
+    print("  python inference.py --batch sites.json")
+    sys.exit(1)

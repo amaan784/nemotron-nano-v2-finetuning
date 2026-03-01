@@ -1,92 +1,151 @@
 #!/bin/bash
 # ============================================================
-# Agentic World — Brev Instance Setup
+# Agentic World -- Brev Instance Setup
 # ============================================================
-# Run this first on your Brev instance to install all deps.
+# Sets up a Brev GPU instance for fine-tuning Mistral Nemo 12B
+# with Unsloth + QLoRA.
+#
+# Track: W&B Fine-Tuning (Mistral Worldwide Hackathon)
+# Model: Mistral Nemo 12B Instruct (standard Transformer)
+# GPU:   A10G (24GB) recommended, A100 (40GB) optimal
 #
 # Usage:
 #   chmod +x setup_brev.sh && ./setup_brev.sh
+#
+# Note: No mamba_ssm or causal_conv1d needed!
+#       Mistral Nemo is a standard Transformer architecture.
 # ============================================================
 
-set -e
+set -eo pipefail  # Exit on any error, including in pipelines
 
 echo "============================================"
-echo "AGENTIC WORLD — BREV SETUP"
+echo "AGENTIC WORLD -- BREV SETUP"
 echo "============================================"
+echo "Model: Mistral Nemo 12B (Standard Transformer)"
+echo "Method: QLoRA via Unsloth"
+echo ""
 
-# Load .env if present
-if [ -f .env ]; then
-    echo "Loading .env file..."
-    export $(grep -v '^#' .env | xargs)
+# ============================================================
+# 1. VERIFY GPU
+# ============================================================
+
+echo "[CHECK] Checking GPU..."
+if ! nvidia-smi > /dev/null 2>&1; then
+    echo "[ERROR] No GPU detected! Make sure you are on a GPU instance."
+    exit 1
 fi
 
-# Check GPU
-echo ""
-echo "Checking GPU..."
-nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv,noheader || echo "WARNING: nvidia-smi failed. Check GPU drivers."
+GPU_NAME=$(nvidia-smi --query-gpu=name --format=csv,noheader | head -1)
+GPU_MEM=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader | head -1)
+echo "[OK] GPU: $GPU_NAME ($GPU_MEM)"
 echo ""
 
-# Install Unsloth (handles torch, transformers, etc.)
-echo "Installing Unsloth..."
+# ============================================================
+# 2. INSTALL UNSLOTH
+# ============================================================
+
+echo "[INSTALL] Installing Unsloth (handles torch, transformers, bitsandbytes)..."
 pip install --upgrade pip
-pip install unsloth
+pip install "unsloth[colab-new] @ git+https://github.com/unslothai/unsloth.git" --quiet
 
-# Install additional deps
-echo "Installing W&B, datasets, trl..."
-pip install wandb datasets trl
+# Verify unsloth
+python -c "from unsloth import FastLanguageModel; print('[OK] Unsloth installed')"
 
-# Login to W&B
+# ============================================================
+# 3. INSTALL TRAINING DEPENDENCIES
+# ============================================================
+
 echo ""
+echo "[INSTALL] Installing training dependencies..."
+pip install wandb datasets trl peft accelerate --quiet
+
+# ============================================================
+# 4. LOGIN TO W&B
+# ============================================================
+
+echo ""
+echo "[AUTH] Logging into Weights & Biases..."
 if [ -n "$WANDB_API_KEY" ]; then
-    echo "Logging into W&B using .env key..."
     wandb login "$WANDB_API_KEY"
+    echo "[OK] W&B logged in via env var"
 else
-    echo "Login to Weights & Biases:"
-    echo "   Get your API key from https://wandb.ai/authorize"
-    wandb login
+    echo "[WARN] WANDB_API_KEY not set. Run manually:"
+    echo "   wandb login"
+    echo "   (Get key from https://wandb.ai/settings)"
 fi
 
-# Login to HuggingFace
+# ============================================================
+# 5. LOGIN TO HUGGING FACE
+# ============================================================
+
 echo ""
+echo "[AUTH] Logging into Hugging Face..."
 if [ -n "$HF_TOKEN" ]; then
-    echo "Logging into HuggingFace using .env token..."
     huggingface-cli login --token "$HF_TOKEN"
+    echo "[OK] HF logged in via env var"
 else
-    echo "Login to HuggingFace (optional, press Enter to skip):"
-    huggingface-cli login || echo "Skipped HF login"
+    echo "[WARN] HF_TOKEN not set. Run manually:"
+    echo "   huggingface-cli login"
+    echo "   (Get token from https://huggingface.co/settings/tokens)"
 fi
 
-# Verify installation
+# ============================================================
+# 6. VERIFY EVERYTHING
+# ============================================================
+
 echo ""
-echo "Verifying installation..."
-python3 -c "
+echo "[CHECK] Verifying installation..."
+python -c "
 import torch
-print(f'PyTorch: {torch.__version__}')
-print(f'CUDA available: {torch.cuda.is_available()}')
+print(f'  PyTorch: {torch.__version__}')
+print(f'  CUDA available: {torch.cuda.is_available()}')
 if torch.cuda.is_available():
-    print(f'GPU: {torch.cuda.get_device_name(0)}')
-    print(f'VRAM: {torch.cuda.get_device_properties(0).total_memory / 1024**3:.1f} GB')
+    print(f'  GPU: {torch.cuda.get_device_name(0)}')
+    print(f'  VRAM: {torch.cuda.get_device_properties(0).total_memory / 1024**3:.1f} GB')
+    print(f'  BF16 support: {torch.cuda.is_bf16_supported()}')
 
-import unsloth
-print(f'Unsloth: installed')
-
-import wandb
-print(f'W&B: {wandb.__version__}')
-
-import datasets
-print(f'Datasets: {datasets.__version__}')
+import transformers
+print(f'  Transformers: {transformers.__version__}')
 
 import trl
-print(f'TRL: {trl.__version__}')
+print(f'  TRL: {trl.__version__}')
+
+import peft
+print(f'  PEFT: {peft.__version__}')
+
+try:
+    import wandb
+    print(f'  W&B: {wandb.__version__}')
+except ImportError:
+    print('  W&B: not installed')
+
+from unsloth import FastLanguageModel
+print(f'  Unsloth: ready')
+
+print()
+print('[OK] All dependencies verified!')
+print('     No mamba_ssm needed -- Mistral Nemo is pure Transformer')
 "
+
+# ============================================================
+# 7. DONE
+# ============================================================
 
 echo ""
 echo "============================================"
-echo "SETUP COMPLETE"
+echo "[OK] SETUP COMPLETE"
 echo "============================================"
 echo ""
 echo "Next steps:"
-echo "  1. Upload train.jsonl and eval.jsonl to this instance"
+echo "  1. Upload train.jsonl and eval.jsonl"
 echo "  2. Run: python finetune.py"
-echo "  3. After training: python inference.py --interactive"
+echo ""
+echo "Quick start:"
+echo "  python finetune.py"
+echo ""
+echo "Fallback to Mistral 7B (if VRAM issues):"
+echo "  MODEL=unsloth/mistral-7b-instruct-v0.3-bnb-4bit python finetune.py"
+echo ""
+echo "Push to HuggingFace after training:"
+echo "  HF_REPO=mistral-hackaton-2026/agentic-world-lora python finetune.py"
 echo ""
